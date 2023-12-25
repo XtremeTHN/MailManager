@@ -3,6 +3,7 @@ import os
 import pickle
 import sqlite3
 import base64
+import pyclip
 
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -19,21 +20,22 @@ from gi.repository import GObject
 # More info https://python-gtk-3-tutorial.readthedocs.io/en/latest/objects.html#create-new-signals:~:text=loop%20and%20Signals-,23.2.2.%20Create%20new%20signals,-New%20signals%20can
 
 SCOPES=['https://mail.google.com/']
-ROOT_DIR=os.path.join(os.getenv('HOME'), "Documents", "Projects", "Linux", "Gmail", 'src')
+ROOT_DIR=os.path.join(os.getenv('HOME'), "Documents", "Projects", "LinuxProjects", "MailManager", 'src')
 CREDENTIALS_FOLDER=os.path.join(ROOT_DIR, "credentials")
 SECRETS_FILE=os.path.join(CREDENTIALS_FOLDER, "credentials.json")
 PICKLE_FILE=os.path.join(CREDENTIALS_FOLDER, "token.pickle")
 
 DATABASE_PATH=os.path.join(ROOT_DIR, "database", "emails.db")
+print(DATABASE_PATH)
 
 class GmailDatabase:
     def __init__(self, db_path: str):
         self.path = db_path
-        self.database = sqlite3.connect(db_path, check_same_thread=False)
+        self.database = sqlite3.connect(db_path)
         self.cursor = self.database.cursor()
         
-        self.database.execute("BEGIN TRANSACTION;")
-        self.database.execute("""
+        self.cursor.execute("BEGIN TRANSACTION;")
+        self.cursor.execute("""
 CREATE TABLE IF NOT EXISTS "Email" (
 	"ID"	INTEGER,
 	"Subject"	TEXT,
@@ -46,21 +48,22 @@ CREATE TABLE IF NOT EXISTS "Email" (
 	PRIMARY KEY("ID" AUTOINCREMENT)
 );
 """)
-        self.database.execute("COMMIT;")
+        self.cursor.execute("COMMIT;")
     def get_emails(self):
         return self.cursor.fetchall()
         
     def get_email(self, id):
-        self.database.execute(f"SELECT * FROM Email WHERE ID = {id};")
+        self.cursor.execute(f"SELECT * FROM Email WHERE ID = {id};")
         return self.cursor.fetchall()
     
     def get_last_email(self):
-        self.database.execute("SELECT * FROM Email ORDER BY column DESC LIMIT 1;")
+        self.cursor.execute("SELECT * FROM Email ORDER BY column DESC LIMIT 1;")
     
     def add_email(self, body, sender_name, sender_icon, sender_email, reciever_name, reciever_email, subject=""):
-        self.database.execute(f"""
-INSERT INTO Email(Subject, Body, SenderName, SenderIcon, SenderEmail, RecieverName, RecieverEmail) VALUES({subject},{body},{sender_name},{sender_icon},{sender_email},{reciever_name},{reciever_email});
+        self.cursor.execute(f"""
+INSERT INTO Email VALUES(NULL, "{subject}","{body}","{sender_name}","{sender_icon}","{sender_email}","{reciever_name}","{reciever_email}");
 """)
+        self.database.commit()
         print("added email")
     
         
@@ -100,7 +103,7 @@ class Gmail(GObject.GObject, threading.Thread):
         threading.Thread.__init__(self, target=self.auth)
 
         self.gmail = None
-        self.database = GmailDatabase(DATABASE_PATH)
+        self.database: sqlite3.Connection = None
 
         self.start()
     
@@ -169,18 +172,36 @@ class Gmail(GObject.GObject, threading.Thread):
             parts = payload.get('parts')[0]
             data = parts['body']['data'].replace("-","+").replace("_","/")
 
+            print("adding to database", sender)
             self.database.add_email(data, sender, "user-symbolic", "example@gmail.com", "axel", "example", subject=subject)
         except Exception as e:
-            print(e)
+            print("Exception: ",e)
+    
+    def start_database(self):
+        """
+        Initializes the database for the Gmail object.
+        Use this method if you need to call the update_database method in another thread
+
+        Returns:
+            None
+        """
+        if self.database is not None:
+            self.database.close()
+        self.database = GmailDatabase(DATABASE_PATH)
 
     def update_database(self):
         """
             Updates/Set's emails info into the database
+            Use this method in the same thread that you called start_database method
+            If Gmail.database is None, it will initialize the database
 
             Emits:
                 emails-download-start
                 emails-download-finish
         """
+        if self.database is None:
+            self.start_database()
+
         self._add_to_prog("")
         res = self.gmail.users().messages().list(userId='me', maxResults=50).execute()
         messages = res.get('messages')
