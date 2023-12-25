@@ -3,7 +3,6 @@ import os
 import pickle
 import sqlite3
 import base64
-import pyclip
 
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -20,7 +19,7 @@ from gi.repository import GObject
 # More info https://python-gtk-3-tutorial.readthedocs.io/en/latest/objects.html#create-new-signals:~:text=loop%20and%20Signals-,23.2.2.%20Create%20new%20signals,-New%20signals%20can
 
 SCOPES=['https://mail.google.com/']
-ROOT_DIR=os.path.join(os.getenv('HOME'), "Documents", "Projects", "LinuxProjects", "MailManager", 'src')
+ROOT_DIR=os.path.join(os.getcwd(), 'src')
 CREDENTIALS_FOLDER=os.path.join(ROOT_DIR, "credentials")
 SECRETS_FILE=os.path.join(CREDENTIALS_FOLDER, "credentials.json")
 PICKLE_FILE=os.path.join(CREDENTIALS_FOLDER, "token.pickle")
