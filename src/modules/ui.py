@@ -12,7 +12,7 @@ VERTICAL=Gtk.Orientation.VERTICAL
 
 def handle(gm: Gmail):
     print("Reading emails")
-    print(gm.emails())
+    print(gm.update_database())
 
 class GmailUI(Gtk.ApplicationWindow):
     def __init__(self, app: Adw.Application):

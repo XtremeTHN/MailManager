@@ -2,6 +2,7 @@ import threading
 import os
 import pickle
 import sqlite3
+import base64
 
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -28,13 +29,13 @@ DATABASE_PATH=os.path.join(ROOT_DIR, "database", "emails.db")
 class GmailDatabase:
     def __init__(self, db_path: str):
         self.path = db_path
-        self.database = sqlite3.connect(db_path)
+        self.database = sqlite3.connect(db_path, check_same_thread=False)
         self.cursor = self.database.cursor()
         
+        self.database.execute("BEGIN TRANSACTION;")
         self.database.execute("""
-BEGIN TRANSACTION;
 CREATE TABLE IF NOT EXISTS "Email" (
-	"ID"	INTEGER NOT NULL,
+	"ID"	INTEGER,
 	"Subject"	TEXT,
 	"Body"	TEXT NOT NULL,
 	"SenderName"	TEXT NOT NULL,
@@ -42,10 +43,10 @@ CREATE TABLE IF NOT EXISTS "Email" (
 	"SenderEmail"	TEXT NOT NULL,
 	"RecieverName"	TEXT NOT NULL,
 	"RecieverEmail"	TEXT NOT NULL,
-	PRIMARY KEY("ID")
+	PRIMARY KEY("ID" AUTOINCREMENT)
 );
-COMMIT;
 """)
+        self.database.execute("COMMIT;")
     def get_emails(self):
         return self.cursor.fetchall()
         
@@ -56,10 +57,11 @@ COMMIT;
     def get_last_email(self):
         self.database.execute("SELECT * FROM Email ORDER BY column DESC LIMIT 1;")
     
-    def add_email(self, id, body, sender_name, sender_icon, sender_email, reciever_name, reciever_email, subject=""):
+    def add_email(self, body, sender_name, sender_icon, sender_email, reciever_name, reciever_email, subject=""):
         self.database.execute(f"""
-INSERT INTO email(ID, Subject, Body, SenderName, SenderIcon, SenderEmail, RecieverName, RecieverEmail) VALUES({id},{subject},{body},{sender_name},{sender_icon},{sender_email},{reciever_name},{reciever_email});
+INSERT INTO Email(Subject, Body, SenderName, SenderIcon, SenderEmail, RecieverName, RecieverEmail) VALUES({subject},{body},{sender_name},{sender_icon},{sender_email},{reciever_name},{reciever_email});
 """)
+        print("added email")
     
         
 class Gmail(GObject.GObject, threading.Thread):
@@ -71,11 +73,16 @@ class Gmail(GObject.GObject, threading.Thread):
         
         'emails-download-start': (GObject.SignalFlags.RUN_LAST,
                                   None, ()),
+        'emails-download-position': (GObject.SignalFlags.RUN_LAST,
+                                     None, (float,)),
         'emails-download-finish': (GObject.SignalFlags.RUN_LAST,
                                    None, ()),
+
+        # 'email-added-to-database', (GObject.SignalFlags.RUN_LAST,
+        #                             None, ())
     }
 
-    stack=GObject.Property(type='str', default="", flags=GObject.ParamFlags.READABLE)
+    stack=GObject.Property(type=GObject.TYPE_STRING, default="")
     def __init__(self):
         """
             Inits the Gmail handler
@@ -148,6 +155,24 @@ class Gmail(GObject.GObject, threading.Thread):
     #         txt = self.gmail.users().messages().get(userId='me', id=msg['id']).execute()
     #         print(txt)
     
+    def _database_item(self, rq_id, res: dict, exc):
+        try:
+            payload=res['payload']
+            headers=payload['headers']
+
+            for d in headers:
+                if d['name'] == 'Subject':
+                    subject = d['value']
+                if d['name'] == 'From':
+                    sender = d['value']
+            
+            parts = payload.get('parts')[0]
+            data = parts['body']['data'].replace("-","+").replace("_","/")
+
+            self.database.add_email(data, sender, "user-symbolic", "example@gmail.com", "axel", "example", subject=subject)
+        except Exception as e:
+            print(e)
+
     def update_database(self):
         """
             Updates/Set's emails info into the database
@@ -156,4 +181,11 @@ class Gmail(GObject.GObject, threading.Thread):
                 emails-download-start
                 emails-download-finish
         """
-        res = self.gmail.users().messages().list(userId='me').execute()
+        self._add_to_prog("")
+        res = self.gmail.users().messages().list(userId='me', maxResults=50).execute()
+        messages = res.get('messages')
+
+        bulk = self.gmail.new_batch_http_request()
+        for msg in messages:
+            bulk.add(self.gmail.users().messages().get(userId='me', id=msg['id']), callback=self._database_item)
+        bulk.execute()
