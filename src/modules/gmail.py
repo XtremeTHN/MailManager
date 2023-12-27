@@ -24,6 +24,13 @@ CREDENTIALS_FOLDER=os.path.join(ROOT_DIR, "credentials")
 SECRETS_FILE=os.path.join(CREDENTIALS_FOLDER, "credentials.json")
 PICKLE_FILE=os.path.join(CREDENTIALS_FOLDER, "token.pickle")
 
+os.makedirs(CREDENTIALS_FOLDER, exist_ok=True)
+
+if os.path.exists(CREDENTIALS_FOLDER) is False:
+    print("You should get some credentials from the Google Cloud Platform Console")
+    print("Exiting...")
+    sys.exit(1)
+
 DATABASE_PATH=os.path.join(ROOT_DIR, "database", "emails.db")
 print(DATABASE_PATH)
 
