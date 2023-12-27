@@ -1,5 +1,6 @@
 import threading
 import os
+import sys
 import pickle
 import sqlite3
 import base64
@@ -44,13 +45,13 @@ class GmailDatabase:
         self.cursor.execute("""
 CREATE TABLE IF NOT EXISTS "Email" (
 	"ID"	INTEGER,
-	"Subject"	TEXT,
-	"Body"	TEXT NOT NULL,
 	"SenderName"	TEXT NOT NULL,
 	"SenderIcon"	TEXT,
 	"SenderEmail"	TEXT NOT NULL,
 	"RecieverName"	TEXT NOT NULL,
 	"RecieverEmail"	TEXT NOT NULL,
+	"Subject"	TEXT,
+	"Body"	TEXT NOT NULL,
 	PRIMARY KEY("ID" AUTOINCREMENT)
 );
 """)
@@ -67,7 +68,7 @@ CREATE TABLE IF NOT EXISTS "Email" (
     
     def add_email(self, body, sender_name, sender_icon, sender_email, reciever_name, reciever_email, subject=""):
         self.cursor.execute(f"""
-INSERT INTO Email VALUES(NULL, "{subject}","{body}","{sender_name}","{sender_icon}","{sender_email}","{reciever_name}","{reciever_email}");
+INSERT INTO Email VALUES(NULL, "{sender_name}","{sender_icon}","{sender_name}","{sender_icon}","{sender_email}","{reciever_name}","{reciever_email}");
 """)
         self.database.commit()
         print("added email")
@@ -109,6 +110,7 @@ class Gmail(GObject.GObject, threading.Thread):
         threading.Thread.__init__(self, target=self.auth)
 
         self.gmail = None
+        self.oauth = None
         self.database: sqlite3.Connection = None
 
         self.start()
@@ -153,8 +155,10 @@ class Gmail(GObject.GObject, threading.Thread):
         self._add_to_prog("Connecting to the Gmail API...")
         self.gmail = build('gmail', 'v1', credentials=creds)
 
-        self._add_to_prog("Authentiation finished")
+        self._add_to_prog("Authentication finished")
         self.emit('authentication-finish')
+
+        self.people = build('people', "v1", credentials=creds)
     
     # def emails(self):
     #     res = self.gmail.users().messages().list(userId='me').execute()
@@ -164,6 +168,14 @@ class Gmail(GObject.GObject, threading.Thread):
     #         txt = self.gmail.users().messages().get(userId='me', id=msg['id']).execute()
     #         print(txt)
     
+    def _get_account_photo(self, sender, reciever) -> list[str]:
+        sender = sender.split("<")[1].replace(">", "").split("@")[0]
+        reciever = reciever.split("<")[1].replace(">", "").split("@")[0]
+        self.people.people().connections().list(
+            resourceName=f"people/{sender}",
+            
+        )
+
     def _database_item(self, rq_id, res: dict, exc):
         try:
             payload=res['payload']
@@ -174,12 +186,15 @@ class Gmail(GObject.GObject, threading.Thread):
                     subject = d['value']
                 if d['name'] == 'From':
                     sender = d['value']
+                if d['name'] == 'To':
+                    reciever = d['value']
             
             parts = payload.get('parts')[0]
             data = parts['body']['data'].replace("-","+").replace("_","/")
 
             print("adding to database", sender)
             self.database.add_email(data, sender, "user-symbolic", "example@gmail.com", "axel", "example", subject=subject)
+            print(self._get_account_photo(sender, reciever))
         except Exception as e:
             print("Exception: ",e)
     
