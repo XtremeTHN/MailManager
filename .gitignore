@@ -1,2 +1,3 @@
 .venv
-src/credentials
+src/credentials/*
+src/database/*
