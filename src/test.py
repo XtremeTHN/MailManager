@@ -9,13 +9,13 @@ from datetime import datetime
 
 
 def handle_finish(gm: Gmail):
-    # gm.populate_database()
     # last_email = list(gm.database.get_email(-1)[0])
     # last_email[-1] = base64.b64decode(last_email[-1]).decode()
 
     # soup = BeautifulSoup(last_email[-1], 'lxml')
     # last_email[-1] = soup.body()
-    gm.check_emails_update()
+
+    gm.synchronize()
 
 gm = Gmail()
 

@@ -3,6 +3,7 @@ import os
 import sys
 import pickle
 import sqlite3
+import re
 
 import keyring
 from cryptography.fernet import Fernet
@@ -310,7 +311,6 @@ class Gmail(GObject.GObject, threading.Thread):
             headers=payload['headers']
 
             id = res['id']
-            created_time=res['internalDate']
             for d in headers:
                 if d['name'] == 'Subject':
                     subject = d['value']
@@ -328,6 +328,9 @@ class Gmail(GObject.GObject, threading.Thread):
                         reciever = [reciever_data[0], reciever_data[1].split('>')[0]]
                     except:
                         reciever = [d['value'], d['value']]
+                if d['name'] == 'Date':
+                    created_time = d['value']
+
             parts = list(filter(lambda x: x['mimeType'] == 'text/html', payload.get('parts')))[0]
 
             if parts is not None:
@@ -336,11 +339,21 @@ class Gmail(GObject.GObject, threading.Thread):
                 parts = payload.get('parts')[0]
                 data = parts['body']['data'].replace("-","+").replace("_","/")
 
-            self.database.add_email(id, data, sender[0], "avatar-default", sender[1], reciever[0], reciever[1], created_time, subject=subject)
+            self.database.add_email(
+                id, 
+                sender[0], 
+                "avatar-default", 
+                sender[1],
+                reciever[0],
+                reciever[1],
+                created_time, 
+                data, subject=subject
+            )
 
         except Exception as e:
-            print(f"{type(e).__name__}: {e}")
-    
+            print(f"\n{type(e).__name__}: {e}")
+            return False
+
     def start_database(self):
         """
         Initializes the database for the Gmail object.
@@ -369,12 +382,27 @@ class Gmail(GObject.GObject, threading.Thread):
         """
         return self.gmail.users().messages().list(userId='me', maxResults=chunk, pageToken=nextPageToken, **parameters).execute()
 
-    def check_emails_update(self):
-        last_local_email = self.database.get_email(-1)
-        last_email = self.get_chunk_of_emails(1,)
-        print(last_local_email, last_email)
+    def partial_sync(self):
+        ...
+        
 
-    def populate_database(self):
+    def _get_all_emails_from_gmail(self, messages, res):
+        while True:
+            print("INFO: Going back into loop...")
+            for msg in messages:
+                print(f"INFO: Parsing email {msg['id']}.", end='\r')
+                self.parse_email(self.gmail.users().messages().get(userId='me', id=msg['id']).execute())
+            print('\nINFO: Getting next chunk...')
+            if 'nextPageToken' not in res:
+                break
+            else:
+                self.database.save()
+                res = self.get_chunk_of_emails(500, res['nextPageToken'])
+                messages = res.get('messages')
+                email_pos = 0
+                pos += 500
+
+    def synchronize(self):
         """
             Populates the database with emails info
             This method will always initialize a new GmailDatabase instance. If Gmail.database is not None, the database will be closed
@@ -396,30 +424,13 @@ class Gmail(GObject.GObject, threading.Thread):
         res = self.get_chunk_of_emails(500)
         messages = res.get('messages')
 
-        total = 817
-        pos = 0
-        email_pos = 0
-        try:
-            while True:
-                print("INFO: Going back into loop... Progress: " + str(pos) + "/" + str(total))
-                for msg in messages:
-                    print(f"INFO: Parsing email {msg['id']}. Progress: {email_pos}/{500}")
-                    self.parse_email(self.gmail.users().messages().get(userId='me', id=msg['id']).execute())
-                    email_pos += 1
 
-                print('INFO: Getting next chunk...')
-                if 'nextPageToken' not in res or pos == total:
-                    break
-                else:
-                    self.database.save()
-                    res = self.get_chunk_of_emails(500, res['nextPageToken'])
-                    messages = res.get('messages')
-                    email_pos = 0
-                    pos += 500
+        try:
+            self._get_all_emails_from_gmail(messages, res)
         except:
-            print("FATAL: Error while populating database. Saving current changes...")
+            print("\nFATAL: Error while populating database. Saving current changes...")
             self.database.save()
-            return
-        
-        print("INFO: Database population finished")
     
+        print("INFO: Database population finished")
+        self.database.cursor.execute("SELECT * FROM Email ORDER BY ID DESC;")
+        self.database.save()
